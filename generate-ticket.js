@@ -1,5 +1,5 @@
 const fs = require('fs');
-
+//new
 // Generates an unpredictable 6-character code (e.g. "K7X9P2")
 // Excludes confusing characters like 0, O, 1, I
 function makeRandomCode() {
