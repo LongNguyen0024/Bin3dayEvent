@@ -59,14 +59,15 @@ app.post('/api/scratch', async (req, res) => {
 
     if (ticketError) {
       console.error('Ticket lookup error:', ticketError);
-
-      return res.status(500).json({
-      success: false,
-      error: 'Ticket lookup failed.'})
-
       console.log("Looking for ticket:", cleanCode);
       console.log("Ticket result:", ticket);
       console.log("Ticket error:", ticketError);
+      
+      return res.status(500).json({
+      success: false,
+      error: 'Ticket lookup failed.'});
+
+      
     ;
 }
     // If code doesn't exist in our 240 pre-generated pool
