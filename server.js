@@ -84,9 +84,9 @@ app.post('/api/scratch', async (req, res) => {
         prize_awarded: ticket.prize_name
       }]);
     
-    console.log("RECEIVED CODE FROM FRONTEND:", ticket_code);
-    console.log("SUPABASE RESULT:", ticket);
-    console.log("SUPABASE ERROR:", error);
+  console.log("RECEIVED CODE FROM FRONTEND:", ticket_code);
+  console.log("SUPABASE RESULT:", ticket);
+  console.log("SUPABASE ERROR:", error);
 
 
     // -------------------------------------------------------------
