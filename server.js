@@ -51,12 +51,20 @@ app.post('/api/scratch', async (req, res) => {
     // CHECK 2: TICKET VALIDATION
     // Fetch code from tickets table
     // -------------------------------------------------------------
-    const { data: ticket } = await supabase
+    const { data: ticket, error: ticketError } = await supabase
       .from('tickets')
       .select('code, is_used, prize_name')
       .eq('code', cleanCode)
       .single();
 
+    if (ticketError) {
+      console.error('Ticket lookup error:', ticketError);
+
+      return res.status(500).json({
+      success: false,
+      error: 'Ticket lookup failed.'
+    });
+}
     // If code doesn't exist in our 240 pre-generated pool
     if (!ticket) {
       return res.status(400).json({ success: false, error: 'Invalid ticket code.' });
@@ -84,10 +92,6 @@ app.post('/api/scratch', async (req, res) => {
         prize_awarded: ticket.prize_name
       }]);
     
-    console.log("RECEIVED CODE FROM FRONTEND:", ticket_code);
-    console.log("SUPABASE RESULT:", ticket);
-    console.log("SUPABASE ERROR:", error);
-
 
     // -------------------------------------------------------------
     // RETURN RESULT
