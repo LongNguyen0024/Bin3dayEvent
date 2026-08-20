@@ -21,7 +21,6 @@ const supabase = createClient(
 app.post('/api/scratch', async (req, res) => {
   try {
     const { email, ticket_code } = req.body;
-    console.log("RECEIVED CODE FROM FRONTEND:", ticket_code);
     // Reject early if required fields are missing
     if (!email || !ticket_code) {
       return res.status(400).json({ success: false, error: 'Email and ticket code are required.' });
@@ -84,6 +83,11 @@ app.post('/api/scratch', async (req, res) => {
         ticket_code: cleanCode,
         prize_awarded: ticket.prize_name
       }]);
+    
+    console.log("RECEIVED CODE FROM FRONTEND:", ticket_code);
+    console.log("SUPABASE RESULT:", ticket);
+    console.log("SUPABASE ERROR:", error);
+
 
     // -------------------------------------------------------------
     // RETURN RESULT
