@@ -1,0 +1,340 @@
+<style>
+  /* Base card wrapper styling */
+  .scratch-container {
+    max-width: 420px;
+    margin: 30px auto;
+    padding: 24px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    text-align: center;
+    box-sizing: border-box;
+  }
+
+  /* Utility classes to toggle visibility across steps */
+  .step-panel { display: block; }
+  .hidden { display: none !important; }
+
+  /* Input fields */
+  .input-group { margin-bottom: 16px; text-align: left; }
+  .input-group label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }
+  .input-group input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+
+  /* Primary Action Buttons */
+  .btn-submit {
+    width: 100%; padding: 14px; background: #000; color: #fff; border: none; border-radius: 8px;
+    font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.2s ease;
+  }
+  .btn-submit:hover { background: #333; }
+  .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .error-msg { color: #d9534f; font-size: 14px; margin-top: 12px; min-height: 20px; }
+
+  /* Scratch Card Canvas Container */
+  .scratch-card-wrapper {
+    position: relative; width: 300px; height: 180px; margin: 20px auto;
+    border-radius: 12px; overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  
+  /* Underlay: Holds the text that sits BEHIND the scratch canvas */
+  .prize-underlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #f8f9fa;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    border: 2px dashed #ccc; box-sizing: border-box;
+  }
+  .prize-title { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+  .prize-value { font-size: 24px; font-weight: 800; color: #111; margin-top: 6px; }
+
+  /* HTML5 Canvas overlay covering the prize */
+  #scratchCanvas { position: absolute; top: 0; left: 0; width: 300px; height: 180px; cursor: pointer; }
+
+  /* Step 3: Winning Display Badge for Studio Verification */
+  .ticket-card {
+    background: #f8f9fa;
+    border: 2px dashed #28a745;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+  }
+  .ticket-code-badge {
+    font-family: monospace;
+    font-size: 22px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: #111;
+    background: #e2e8f0;
+    padding: 6px 14px;
+    border-radius: 6px;
+    display: inline-block;
+    margin-top: 8px;
+  }
+  .instruction-text { font-size: 14px; color: #555; line-height: 1.5; }
+</style>
+
+<div class="scratch-container">
+  
+  <!-- =============================================================
+       STEP 1: CODE INPUT VIEW
+       ============================================================= -->
+  <div id="step1" class="step-panel">
+    <h2>Enter Event Ticket</h2>
+    <p>Provide your unique ticket code to play.</p>
+    <div class="input-group">
+      <label for="ticketCode">Ticket Code</label>
+      <input type="text" id="ticketCode" placeholder="e.g. BF78A2" maxlength="20" autocomplete="off" style="text-transform:uppercase;">
+    </div>
+    <button id="submitBtn" class="btn-submit" type="button">Unlock Scratch Card</button>
+    <div id="errorDisplay" class="error-msg"></div>
+  </div>
+
+  <!-- =============================================================
+       STEP 2: CANVAS SCRATCH GAME VIEW
+       ============================================================= -->
+  <div id="step2" class="step-panel hidden">
+    <h2>Scratch to Reveal</h2>
+    <p>Use your finger or mouse to scratch off the coating!</p>
+    <div class="scratch-card-wrapper">
+      <!-- Underlay content exposed as user scratches canvas -->
+      <div class="prize-underlay">
+        <!-- <span class="prize-title">You Won:</span> -->
+        <span id="prizeText" class="prize-value">...</span>
+      </div>
+      <!-- Canvas overlay that gets erased -->
+      <canvas id="scratchCanvas" width="300" height="180"></canvas>
+    </div>
+  </div>
+
+  <!-- =============================================================
+       STEP 3: FINAL RESULTS VIEW
+       ============================================================= -->
+  <div id="step3" class="step-panel hidden">
+    
+    <!-- View 3A: Winner Output Screen -->
+    <div id="winnerArea" class="hidden">
+      <h2>Congratulations! 🎉</h2>
+      <p>You revealed a winning ticket!</p>
+
+      <div class="ticket-card">
+        <span style="font-size: 12px; color: #666; text-transform: uppercase;">Prize Awarded</span>
+        <h1 id="finalPrizeDisplay" style="color:#28a745; margin: 6px 0 16px 0;"></h1>
+        
+        <span style="font-size: 12px; color: #666; text-transform: uppercase;">Ticket Code</span><br>
+        <span id="winningTicketCode" class="ticket-code-badge">------</span>
+      </div>
+
+      <p class="instruction-text">
+        <strong>How to redeem:</strong> Please present this screen along with your physical scratch card to the studio staff to claim your prize.
+      </p>
+    </div>
+
+    <!-- View 3B: Non-Winner Output Screen -->
+    <div id="loserArea" class="hidden">
+      <h2>Better Luck Next Time! 😢</h2>
+      <p>Unfortunately, this ticket did not win a prize.</p>
+      <p>Thanks for playing!</p>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+(function() {
+  // Backend API Endpoints
+  const BACKEND_BASE_URL = "https://unmatched-dubiously-fleshed.ngrok-free.dev";
+  const SCRATCH_URL = `${BACKEND_BASE_URL}/api/scratch`;
+
+  // DOM Elements Selection
+  const step1 = document.getElementById("step1");
+  const step2 = document.getElementById("step2");
+  const step3 = document.getElementById("step3");
+  const ticketCodeInput = document.getElementById("ticketCode");
+  const submitBtn = document.getElementById("submitBtn");
+  const errorDisplay = document.getElementById("errorDisplay");
+  const prizeText = document.getElementById("prizeText");
+  const finalPrizeDisplay = document.getElementById("finalPrizeDisplay");
+  const winningTicketCode = document.getElementById("winningTicketCode");
+  
+  const winnerArea = document.getElementById("winnerArea");
+  const loserArea = document.getElementById("loserArea");
+
+  const canvas = document.getElementById("scratchCanvas");
+  const ctx = canvas.getContext("2d");
+
+  // Application State Variables
+  let isScratching = false;      // Track user mouse/touch press state
+  let assignedPrize = "";        // Store prize string from backend response
+  let validatedCode = "";        // Store uppercase ticket code
+  let isRevealed = false;        // Flag when scratch percentage threshold is hit
+  let canvasInitialized = false; // Prevent double canvas event setup
+
+  // =============================================================
+  // STEP 1: SUBMIT TICKET CODE TO SERVER
+  // =============================================================
+  submitBtn.addEventListener("click", async () => {
+    const code = ticketCodeInput.value.trim().toUpperCase();
+    if (!code) return errorDisplay.innerText = "Please enter your ticket code.";
+
+    // UI Feedback: disable button and update text
+    errorDisplay.innerText = "";
+    submitBtn.innerText = "Validating...";
+    submitBtn.disabled = true;
+
+    try {
+      // Call Express server endpoint
+      const response = await fetch(SCRATCH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket_code: code })
+      });
+
+      const data = await response.json();
+
+      // If backend returned an error (invalid/used ticket)
+      if (!response.ok || !data.success) {
+        errorDisplay.innerText = data.error || "Invalid ticket. Please try again.";
+        submitBtn.innerText = "Unlock Scratch Card";
+        submitBtn.disabled = false;
+        return;
+      }
+
+      // Save backend response to state
+      assignedPrize = data.prize;
+      validatedCode = data.ticket_code;
+      
+      // Inject prize & code into DOM elements
+      prizeText.innerText = assignedPrize;
+      finalPrizeDisplay.innerText = assignedPrize;
+      winningTicketCode.innerText = validatedCode;
+
+      // Transition UI: Hide Step 1, Show Step 2, Setup Canvas
+      step1.classList.add("hidden");
+      step2.classList.remove("hidden");
+      initCanvas();
+
+    } catch (err) {
+      console.error("Scratch request failed:", err);
+      errorDisplay.innerText = "Server connection failed. Please try again.";
+      submitBtn.innerText = "Unlock Scratch Card";
+      submitBtn.disabled = false;
+    }
+  });
+
+  // =============================================================
+  // STEP 2: SCRATCH CANVAS ENGINE (MOUSE & TOUCH PHYSICS)
+  // =============================================================
+  function initCanvas() {
+    if (canvasInitialized) return;
+    canvasInitialized = true;
+    isRevealed = false;
+
+    // Fill canvas with silver scratch coating
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#C0C0C0";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw "SCRATCH HERE" instruction text on silver coating
+    ctx.fillStyle = "#666";
+    ctx.font = "bold 16px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("SCRATCH HERE", canvas.width / 2, canvas.height / 2);
+
+    // Register Mouse Event Listeners
+    canvas.addEventListener("mousedown", startScratch);
+    window.addEventListener("mouseup", stopScratch);
+    canvas.addEventListener("mousemove", scratch);
+
+    // Register Touch Event Listeners (Mobile Support)
+    canvas.addEventListener("touchstart", startScratch, { passive: false });
+    window.addEventListener("touchend", stopScratch);
+    canvas.addEventListener("touchmove", scratch, { passive: false });
+  }
+
+  function startScratch(e) {
+    e.preventDefault();
+    isScratching = true;
+    scratch(e); // Scratch immediately on touch/click
+  }
+
+  function stopScratch() { 
+    isScratching = false; 
+  }
+
+  function scratch(e) {
+    if (!isScratching || isRevealed) return;
+    if (e.cancelable) e.preventDefault(); // Prevent mobile screen scrolling while scratching
+
+    // Calculate mouse/touch position relative to canvas bounding box
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    // Account for CSS scaling vs internal canvas coordinate resolution
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    // "destination-out" acts as an eraser to make drawn pixels transparent
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.arc(x, y, 20, 0, Math.PI * 2); // 20px radius brush
+    ctx.fill();
+
+    // Check how much of the card has been scratched
+    checkScratchPercentage();
+  }
+
+  // Calculate percentage of transparent pixels
+  function checkScratchPercentage() {
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+    let clearPixels = 0;
+
+    // Loop through alpha channel (every 4th element: R, G, B, Alpha)
+    for (let i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] === 0) clearPixels++; // Alpha = 0 means erased pixel
+    }
+
+    const percentage = (clearPixels / (pixels.length / 4)) * 100;
+    
+    // Auto-reveal when 50% or more of coating is scratched away
+    if (percentage >= 50 && !isRevealed) revealPrize();
+  }
+
+  // Smooth transition from Step 2 to Step 3
+  function revealPrize() {
+    isRevealed = true;
+    canvas.style.transition = "opacity .6s ease";
+    canvas.style.opacity = "0"; // Fade out remaining canvas
+
+    setTimeout(() => {
+      step2.classList.add("hidden");
+      step3.classList.remove("hidden");
+
+      // Normalize prize string to safely check for non-winning values
+      const normalizedPrize = (assignedPrize || "").toString().trim().toLowerCase();
+      const isLoser = normalizedPrize.includes("better luck") || normalizedPrize.includes("no prize");
+
+      // Branch view based on outcome
+      if (isLoser) {
+        winnerArea.classList.add("hidden");
+        loserArea.classList.remove("hidden");
+      } else {
+        loserArea.classList.add("hidden");
+        winnerArea.classList.remove("hidden");
+      }
+    }, 800);
+  }
+
+  // Submit form when pressing "Enter" in the input field
+  ticketCodeInput.addEventListener("keydown", (e) => { 
+    if (e.key === "Enter") { 
+      e.preventDefault(); 
+      submitBtn.click(); 
+    } 
+  });
+})();
+</script>

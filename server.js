@@ -1,115 +1,141 @@
-// 1. IMPORT DEPENDENCIES & INITIALIZE SERVER
+// Load environment variables (.env file) into process.env
+require('dotenv').config();
+
+// Import required Node.js libraries
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 
+// Initialize the Express app
 const app = express();
 
-// cors() allows your Squarespace domain to send requests to this server
-app.use(cors()); 
+// Middleware: Enable Cross-Origin Resource Sharing (allows frontend to call backend)
+app.use(cors());
 
-// Enables express to parse incoming JSON payloads from the frontend
-app.use(express.json()); 
+// Middleware: Parse incoming JSON requests automatically
+app.use(express.json());
 
-// Connect to Supabase securely using hidden environment variables stored on Render
+// Initialize Supabase Client with Admin Access (Service Role Key bypasses RLS)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// 2. DEFINE THE API ENDPOINT (/api/scratch)
+// =============================================================
+// HEALTH CHECK ENDPOINT
+// GET /
+// Simple route to verify server is active on Render/ngrok
+// =============================================================
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Scratch ticket server is running.'
+  });
+});
+
+// =============================================================
+// VALIDATE & CONSUME TICKET ENDPOINT
+// POST /api/scratch
+// =============================================================
 app.post('/api/scratch', async (req, res) => {
   try {
-    const { email, ticket_code } = req.body;
-    // Reject early if required fields are missing
-    if (!email || !ticket_code) {
-      return res.status(400).json({ success: false, error: 'Email and ticket code are required.' });
-    }
+    // 1. Extract the ticket_code from the incoming JSON body
+    const { ticket_code } = req.body;
 
-    // Clean inputs (e.g., " User@Email.com " -> "user@email.com")
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanCode = ticket_code.trim().toUpperCase();
-
-    // -------------------------------------------------------------
-    // CHECK 1: EMAIL DUPLICATION
-    // Query claims table for existing entry
-    // -------------------------------------------------------------
-    const { data: existingClaim } = await supabase
-      .from('claims')
-      .select('email')
-      .eq('email', cleanEmail)
-      .single();
-
-    if (existingClaim) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'This email address has already participated.' 
+    // Reject immediately if no code was provided
+    if (!ticket_code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Ticket code is required.'
       });
     }
 
-    // -------------------------------------------------------------
-    // CHECK 2: TICKET VALIDATION
-    // Fetch code from tickets table
-    // -------------------------------------------------------------
-    const { data: ticket, error: ticketError } = await supabase
+    // 2. Clean the string: remove spaces and normalize to uppercase
+    const cleanCode = String(ticket_code).trim().toUpperCase();
+    console.log('Play attempt:', cleanCode);
+
+    // 3. Query Supabase to find if the ticket exists
+    const { data: ticket, error: lookupError } = await supabase
       .from('tickets')
       .select('code, is_used, prize_name')
       .eq('code', cleanCode)
-      .single();
+      .maybeSingle(); // Returns 1 object or null (doesn't throw error if not found)
 
-    if (ticketError) {
-      console.error('Ticket lookup error:', ticketError);
-      console.log("Looking for ticket:", cleanCode);
-      console.log("Ticket result:", ticket);
-      console.log("Ticket error:", ticketError);
-      
+    // Handle database connection errors
+    if (lookupError) {
+      console.error('Ticket lookup error:', lookupError);
       return res.status(500).json({
-      success: false,
-      error: 'Ticket lookup failed.'});
+        success: false,
+        error: 'Database error while checking ticket.'
+      });
+    }
 
-      
-    ;
-}
-    // If code doesn't exist in our 240 pre-generated pool
+    // 4. Reject if ticket code doesn't exist in Supabase
     if (!ticket) {
-      return res.status(400).json({ success: false, error: 'Invalid ticket code.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid ticket code.'
+      });
     }
 
-    // If code was already redeemed by someone else
+    // 5. Reject if ticket code has already been scratched/used
     if (ticket.is_used) {
-      return res.status(400).json({ success: false, error: 'This ticket code has already been redeemed.' });
+      return res.status(400).json({
+        success: false,
+        error: 'This ticket code has already been used.'
+      });
     }
 
-    // -------------------------------------------------------------
-    // EXECUTE CLAIM
-    // Mark ticket as used and record the user claim
-    // -------------------------------------------------------------
-    await supabase
+    // =========================================================
+    // 6. CONSUME THE TICKET IMMEDIATELY
+    // We update is_used = true ONLY if is_used is currently false.
+    // This atomic query prevents race conditions (two people trying to
+    // redeem the same ticket at the exact same millisecond).
+    // =========================================================
+    const { data: consumedTicket, error: consumeError } = await supabase
       .from('tickets')
       .update({ is_used: true })
-      .eq('code', cleanCode);
+      .eq('code', cleanCode)
+      .eq('is_used', false) // Ensures double-spending protection
+      .select('code, is_used, prize_name')
+      .maybeSingle();
 
-    await supabase
-      .from('claims')
-      .insert([{
-        email: cleanEmail,
-        ticket_code: cleanCode,
-        prize_awarded: ticket.prize_name
-      }]);
-    
+    if (consumeError) {
+      console.error('Ticket consume error:', consumeError);
+      return res.status(500).json({
+        success: false,
+        error: 'Unable to activate this ticket.'
+      });
+    }
 
-    // -------------------------------------------------------------
-    // RETURN RESULT
-    // Send success status and the prize back to front-end canvas
-    // -------------------------------------------------------------
-    return res.json({ success: true, prize: ticket.prize_name });
+    // If another request consumed it first in that microsecond
+    if (!consumedTicket) {
+      return res.status(400).json({
+        success: false,
+        error: 'This ticket code has already been used.'
+      });
+    }
+
+    console.log(`Ticket consumed successfully: ${cleanCode} -> ${consumedTicket.prize_name}`);
+
+    // 7. Return the verified ticket code and prize to the frontend
+    return res.json({
+      success: true,
+      ticket_code: consumedTicket.code,
+      prize: consumedTicket.prize_name
+    });
 
   } catch (err) {
-    console.error('Server error:', err);
-    return res.status(500).json({ success: false, error: 'Internal server error.' });
+    console.error('Scratch endpoint error:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error.'
+    });
   }
 });
 
-// 3. START SERVER LISTENING ON PORT
+// Start Express server on specified PORT or default 3000
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
