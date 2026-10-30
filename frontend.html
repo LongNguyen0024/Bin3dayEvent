@@ -35,6 +35,7 @@
   .scratch-card-wrapper {
     position: relative; width: 300px; height: 180px; margin: 20px auto;
     border-radius: 12px; overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.2);
   }
   
   /* Underlay: Holds the text that sits BEHIND the scratch canvas */
@@ -43,8 +44,7 @@
     display: flex; flex-direction: column; justify-content: center; align-items: center;
     border: 2px dashed #ccc; box-sizing: border-box;
   }
-  .prize-title { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
-  .prize-value { font-size: 24px; font-weight: 800; color: #111; margin-top: 6px; }
+  .prize-value { font-size: 22px; font-weight: 800; color: #111; margin-top: 6px; }
 
   /* HTML5 Canvas overlay covering the prize */
   #scratchCanvas { position: absolute; top: 0; left: 0; width: 300px; height: 180px; cursor: pointer; }
@@ -82,7 +82,7 @@
     <p>Provide your unique ticket code to play.</p>
     <div class="input-group">
       <label for="ticketCode">Ticket Code</label>
-      <input type="text" id="ticketCode" placeholder="e.g. BF78A2" maxlength="20" autocomplete="off" style="text-transform:uppercase;">
+      <input type="text" id="ticketCode" placeholder="e.g. KOGSAY" maxlength="20" autocomplete="off" style="text-transform:uppercase;">
     </div>
     <button id="submitBtn" class="btn-submit" type="button">Unlock Scratch Card</button>
     <div id="errorDisplay" class="error-msg"></div>
@@ -93,14 +93,13 @@
        ============================================================= -->
   <div id="step2" class="step-panel hidden">
     <h2>Scratch to Reveal</h2>
-    <p>Use your finger or mouse to scratch off the coating!</p>
+    <p>Scratch fast! The coating heals behind you!</p>
     <div class="scratch-card-wrapper">
       <!-- Underlay content exposed as user scratches canvas -->
       <div class="prize-underlay">
-        <!-- <span class="prize-title">You Won:</span> -->
         <span id="prizeText" class="prize-value">...</span>
       </div>
-      <!-- Canvas overlay that gets erased -->
+      <!-- Canvas overlay that gets erased and heals -->
       <canvas id="scratchCanvas" width="300" height="180"></canvas>
     </div>
   </div>
@@ -140,12 +139,10 @@
 </div>
 
 <script>
-(function() {
-  // Backend API Endpoints
-  const BACKEND_BASE_URL = "https://unmatched-dubiously-fleshed.ngrok-free.dev";
+document.addEventListener("DOMContentLoaded", () => {
+  const BACKEND_BASE_URL = "https://bin3dayevent.onrender.com";
   const SCRATCH_URL = `${BACKEND_BASE_URL}/api/scratch`;
 
-  // DOM Elements Selection
   const step1 = document.getElementById("step1");
   const step2 = document.getElementById("step2");
   const step3 = document.getElementById("step3");
@@ -160,14 +157,15 @@
   const loserArea = document.getElementById("loserArea");
 
   const canvas = document.getElementById("scratchCanvas");
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
 
-  // Application State Variables
-  let isScratching = false;      // Track user mouse/touch press state
-  let assignedPrize = "";        // Store prize string from backend response
-  let validatedCode = "";        // Store uppercase ticket code
-  let isRevealed = false;        // Flag when scratch percentage threshold is hit
-  let canvasInitialized = false; // Prevent double canvas event setup
+  let isScratching = false;
+  let assignedPrize = "";
+  let validatedCode = "";
+  let isRevealed = false;
+  let canvasInitialized = false;
+  let scratchPaths = [];
 
   // =============================================================
   // STEP 1: SUBMIT TICKET CODE TO SERVER
@@ -176,13 +174,11 @@
     const code = ticketCodeInput.value.trim().toUpperCase();
     if (!code) return errorDisplay.innerText = "Please enter your ticket code.";
 
-    // UI Feedback: disable button and update text
     errorDisplay.innerText = "";
     submitBtn.innerText = "Validating...";
     submitBtn.disabled = true;
 
     try {
-      // Call Express server endpoint
       const response = await fetch(SCRATCH_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +187,6 @@
 
       const data = await response.json();
 
-      // If backend returned an error (invalid/used ticket)
       if (!response.ok || !data.success) {
         errorDisplay.innerText = data.error || "Invalid ticket. Please try again.";
         submitBtn.innerText = "Unlock Scratch Card";
@@ -199,16 +194,13 @@
         return;
       }
 
-      // Save backend response to state
       assignedPrize = data.prize;
       validatedCode = data.ticket_code;
       
-      // Inject prize & code into DOM elements
       prizeText.innerText = assignedPrize;
       finalPrizeDisplay.innerText = assignedPrize;
       winningTicketCode.innerText = validatedCode;
 
-      // Transition UI: Hide Step 1, Show Step 2, Setup Canvas
       step1.classList.add("hidden");
       step2.classList.remove("hidden");
       initCanvas();
@@ -222,40 +214,55 @@
   });
 
   // =============================================================
-  // STEP 2: SCRATCH CANVAS ENGINE (MOUSE & TOUCH PHYSICS)
+  // STEP 2: SCRATCH CANVAS ENGINE WITH METALLIC COATING & HEALING
   // =============================================================
   function initCanvas() {
     if (canvasInitialized) return;
     canvasInitialized = true;
     isRevealed = false;
+    scratchPaths = [];
 
-    // Fill canvas with silver scratch coating
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = "#C0C0C0";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawCoating();
 
-    // Draw "SCRATCH HERE" instruction text on silver coating
-    ctx.fillStyle = "#666";
-    ctx.font = "bold 16px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("SCRATCH HERE", canvas.width / 2, canvas.height / 2);
-
-    // Register Mouse Event Listeners
     canvas.addEventListener("mousedown", startScratch);
     window.addEventListener("mouseup", stopScratch);
     canvas.addEventListener("mousemove", scratch);
 
-    // Register Touch Event Listeners (Mobile Support)
     canvas.addEventListener("touchstart", startScratch, { passive: false });
     window.addEventListener("touchend", stopScratch);
     canvas.addEventListener("touchmove", scratch, { passive: false });
   }
 
+  function drawCoating() {
+    ctx.globalCompositeOperation = "source-over";
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, "#B0B7C6");
+    gradient.addColorStop(0.5, "#E2E8F0");
+    gradient.addColorStop(1, "#8E98A8");
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#4A5568";
+    ctx.font = "bold 15px -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("✦ SCRATCH TO WIN ✦", canvas.width / 2, canvas.height / 2);
+
+    if (scratchPaths.length > 0) {
+      ctx.globalCompositeOperation = "destination-out";
+      scratchPaths.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+  }
+
   function startScratch(e) {
     e.preventDefault();
     isScratching = true;
-    scratch(e); // Scratch immediately on touch/click
+    scratch(e);
   }
 
   function stopScratch() { 
@@ -264,61 +271,68 @@
 
   function scratch(e) {
     if (!isScratching || isRevealed) return;
-    if (e.cancelable) e.preventDefault(); // Prevent mobile screen scrolling while scratching
+    if (e.cancelable) e.preventDefault();
 
-    // Calculate mouse/touch position relative to canvas bounding box
     const rect = canvas.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    // Account for CSS scaling vs internal canvas coordinate resolution
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
 
-    // "destination-out" acts as an eraser to make drawn pixels transparent
+    const newPoint = { x: x, y: y, radius: 18, time: Date.now() };
+    scratchPaths.push(newPoint);
+
     ctx.globalCompositeOperation = "destination-out";
     ctx.beginPath();
-    ctx.arc(x, y, 20, 0, Math.PI * 2); // 20px radius brush
+    ctx.arc(x, y, 18, 0, Math.PI * 2);
     ctx.fill();
 
-    // Check how much of the card has been scratched
     checkScratchPercentage();
   }
 
-  // Calculate percentage of transparent pixels
+  function updateHealing() {
+    if (!canvasInitialized || isRevealed) return;
+    
+    const now = Date.now();
+    const previousLength = scratchPaths.length;
+    scratchPaths = scratchPaths.filter(p => now - p.time < 1200);
+
+    if (scratchPaths.length !== previousLength) {
+      drawCoating();
+    }
+    requestAnimationFrame(updateHealing);
+  }
+  requestAnimationFrame(updateHealing);
+
   function checkScratchPercentage() {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const pixels = imageData.data;
     let clearPixels = 0;
 
-    // Loop through alpha channel (every 4th element: R, G, B, Alpha)
     for (let i = 3; i < pixels.length; i += 4) {
-      if (pixels[i] === 0) clearPixels++; // Alpha = 0 means erased pixel
+      if (pixels[i] === 0) clearPixels++;
     }
 
     const percentage = (clearPixels / (pixels.length / 4)) * 100;
     
-    // Auto-reveal when 50% or more of coating is scratched away
     if (percentage >= 50 && !isRevealed) revealPrize();
   }
 
-  // Smooth transition from Step 2 to Step 3
   function revealPrize() {
     isRevealed = true;
     canvas.style.transition = "opacity .6s ease";
-    canvas.style.opacity = "0"; // Fade out remaining canvas
+    canvas.style.opacity = "0";
 
     setTimeout(() => {
       step2.classList.add("hidden");
       step3.classList.remove("hidden");
 
-      // Normalize prize string to safely check for non-winning values
       const normalizedPrize = (assignedPrize || "").toString().trim().toLowerCase();
-      const isLoser = normalizedPrize.includes("better luck") || normalizedPrize.includes("no prize");
+      const isLoser = normalizedPrize.includes("good luck") || normalizedPrize.includes("better luck") || normalizedPrize.includes("no prize");
 
-      // Branch view based on outcome
       if (isLoser) {
         winnerArea.classList.add("hidden");
         loserArea.classList.remove("hidden");
@@ -329,12 +343,11 @@
     }, 800);
   }
 
-  // Submit form when pressing "Enter" in the input field
   ticketCodeInput.addEventListener("keydown", (e) => { 
     if (e.key === "Enter") { 
       e.preventDefault(); 
       submitBtn.click(); 
     } 
   });
-})();
+});
 </script>
